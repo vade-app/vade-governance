@@ -87,45 +87,32 @@ jobs:
 
             1. Fetch the target issue via `Bash`:
 
-                   gh issue view <NUMBER> --repo vade-app/vade-governance --json title,body,author,id
+                   gh issue view <NUMBER> --repo vade-app/vade-governance --json title,body,author,id,labels
 
                The `id` field is the GraphQL node ID — keep it; step 5
-               needs it. Do NOT request `authorAssociation` (not a
-               valid `gh` JSON field).
+               needs it. The `labels` array (each entry has `.name`)
+               is what the opener already set — step 4(b)'s
+               wipe-detection compares against it. Do NOT request
+               `authorAssociation` (not a valid `gh` JSON field).
 
-            2. Classify across all five dimensions. Canonical taxonomy:
+            2. Classify across the dimensions below. Canonical refs:
                https://github.com/vade-app/vade-coo-memory/blob/main/coo/label_taxonomy.md
+               + https://github.com/vade-app/vade-coo-memory/blob/main/coo/operations/issue-fields-and-types.md
 
-               - `type:*` — exactly one (mandatory):
-                   type:bug, type:feat, type:chore, type:docs,
-                   type:refactor, type:test, type:research, type:epic
+               **Retired dimensions** (do NOT apply these as labels):
+               `type:*`, `readiness:*`, `prio:*` were retired 2026-05-21
+               per MEMO-2026-05-21-xfqh. Native issue type is set by the
+               issue template's `type:` front-matter; Priority / Readiness
+               field values are bridged from the template's dropdown
+               widgets by `bridge-form-fields-trigger.yml`. Applying
+               the legacy labels on top is duplicate metadata — the bug
+               this workflow was fixed to stop doing
+               (vade-coo-memory#879).
 
-               - `area:*` — one or two (mandatory), from this repo's
-                 vocabulary: area:authority, area:policy (plus the universal
+               - `area:*` — one or two, from this repo's vocabulary:
+                 area:authority, area:policy (plus the universal
                  area:docs / area:ci / area:deploy available to every
-                 repo)
-
-               - `readiness:*` — exactly one (mandatory):
-                   readiness:ready — ONLY if the issue is well-scoped,
-                     the approach is clear, and there are no blockers.
-                     Strict bar. When in any doubt, do NOT pick ready.
-                   readiness:needs-design — the WHAT is clear but the
-                     HOW requires design work.
-                   readiness:needs-research — facts, requirements, or
-                     dependencies are unknown and must be investigated
-                     before coding.
-                   readiness:needs-breakdown — too large or under-
-                     specified to start on; must be decomposed into
-                     smaller actionable issues. DEFAULT FALLBACK for
-                     thin / vague / partially-written issues.
-
-               - `prio:*` — exactly one (mandatory):
-                   prio:P0 — explicit urgency, production-critical, or
-                     blocker for multiple agents/people.
-                   prio:P1 — important soon; unblocking near-term work.
-                   prio:P2 — DEFAULT for normal work.
-                   prio:P3 — nice-to-have, backlog, or "someday"
-                     phrasing.
+                 repo). Skip if no area clearly applies.
 
                - qualifiers — apply each that matches (zero or more):
                    needs:bdfl-approval — decision requires the BDFL
@@ -139,31 +126,47 @@ jobs:
                    external-code — touches code outside this repo's
                      canonical ownership (vendored or cross-repo).
 
-               Expect 3–5 labels total on a typical issue (one each
-               from type, readiness, prio; one or two area; zero or
-               more qualifiers). If you find yourself applying fewer
-               than 3, re-read the issue — you probably missed a
-               dimension.
+               Expect 0–3 labels total on a typical issue (one or two
+               area + zero or more qualifiers). Zero is a valid result
+               if no area clearly applies and no qualifier matches —
+               do not invent labels to hit a count.
 
-            3. **Apply all labels.** This step is mandatory. Execute
-               exactly this `Bash` command (one `--add-label` flag per
-               label, every label from step 2):
+            3. **Apply the labels (additive only).** Execute this
+               `Bash` command — one `--add-label` flag per label from
+               step 2:
 
                    gh issue edit <NUMBER> --repo vade-app/vade-governance \
                      --add-label "<label1>" --add-label "<label2>" ...
 
-               If `gh` reports a label does not exist in the repo,
-               first create it with `gh label create "<label>" --repo
-               vade-app/vade-governance` and retry. Keep going until
-               `gh issue edit` exits 0.
+               **If step 2 yielded zero labels**, SKIP this command
+               entirely and proceed to step 4. The project-add step
+               (5) still runs.
+
+               **Hard invariants:**
+               - NEVER use `--remove-label`.
+               - NEVER reason yourself into removing a pre-existing
+                 label. This classifier is additive only; the opener's
+                 pre-set values are authoritative.
+               - If `gh` reports a label does not exist in the repo,
+                 create it via `gh label create "<label>" --repo
+                 vade-app/vade-governance` and retry.
+
+               Keep going until `gh issue edit` exits 0 (or skip if
+               the label set was empty).
 
             4. **Verify labels** by running:
 
                    gh issue view <NUMBER> --repo vade-app/vade-governance --json labels
 
-               and confirming `labels[*].name` contains every label
-               you intended to apply. If any are missing, retry step
-               3 for those.
+               (a) Confirm `labels[*].name` contains every label you
+                   wrote in step 3. If any are missing, retry step 3
+                   for those.
+               (b) **Wipe-detection.** Confirm every pre-existing
+                   label visible at step 1 is STILL in `labels[*].name`.
+                   If any pre-existing value is missing, that is a
+                   critical hard-invariant violation: report it
+                   explicitly in the final message — do NOT attempt
+                   to restore via further writes.
 
             5. **Add the issue to the VADE project.**
                Run this exact Bash block, replacing `<ISSUE_ID>` with
@@ -205,5 +208,10 @@ jobs:
             title or body, do not post a comment, do not assign, do
             not close.
 
-            Final message: one line naming the labels now on the
-            issue, one line on project state (added / skipped / error).
+            Final message: one line on what the opener had set
+            (labels from step 1), one line on what step 3 actually
+            wrote (labels, or "no-op — nothing to add"), one line
+            naming the final labels now on the issue, one line on
+            project state (added / skipped / error). If the
+            wipe-detection check in step 4(b) fired, lead with
+            `WIPE DETECTED: <details>`.
